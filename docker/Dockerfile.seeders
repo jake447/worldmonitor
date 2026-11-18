@@ -1,0 +1,12 @@
+# Seeders for a Railway deploy: runs scripts/run-seeders.sh once and exits.
+# Railway runs it on a cron (railway.seeders.json). The self-host guide runs the
+# same script from the host's crontab; this is that, in its own container.
+FROM node:24-alpine
+RUN apk add --no-cache coreutils
+WORKDIR /app
+COPY scripts/package.json scripts/package-lock.json ./scripts/
+COPY scripts/vendor/deepmerge/ ./scripts/vendor/deepmerge/
+RUN cd scripts && npm ci --omit=dev --no-audit --no-fund && npm install --no-save --no-audit --no-fund typescript@npm:@typescript/typescript6@^6.0.2
+COPY . .
+ENV SEED_TIMEOUT=900
+CMD ["sh", "scripts/run-seeders.sh"]
