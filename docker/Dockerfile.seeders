@@ -6,7 +6,11 @@ RUN apk add --no-cache coreutils
 WORKDIR /app
 COPY scripts/package.json scripts/package-lock.json ./scripts/
 COPY scripts/vendor/deepmerge/ ./scripts/vendor/deepmerge/
-RUN cd scripts && npm ci --omit=dev --no-audit --no-fund && npm install --no-save --no-audit --no-fund typescript@npm:@typescript/typescript6@^6.0.2
+ENV npm_config_install_links=true
+# Same install as Dockerfile.relay: vendored deepmerge needs install_links, and
+# --ignore-scripts keeps native build helpers off Alpine.
+RUN npm ci --prefix scripts --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund \
+ && npm install --prefix scripts --no-save --ignore-scripts --no-audit --no-fund "typescript@npm:@typescript/typescript6@^6.0.2"
 COPY . .
 ENV SEED_TIMEOUT=900
 CMD ["sh", "scripts/run-seeders.sh"]
