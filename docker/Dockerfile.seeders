@@ -1,5 +1,5 @@
-# Seeders for a Railway deploy: runs scripts/run-seeders.sh once and exits.
-# Railway runs it on a cron (railway.seeders.json). The self-host guide runs the
+# Seeders for a Railway deploy: docker/seed-cron.sh runs one time-boxed pass and exits.
+# Railway runs it on a 30-minute cron (set on the service). The self-host guide runs the
 # same script from the host's crontab; this is that, in its own container.
 FROM node:24-alpine
 RUN apk add --no-cache coreutils
@@ -12,5 +12,4 @@ ENV npm_config_install_links=true
 RUN npm ci --prefix scripts --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund \
  && npm install --prefix scripts --no-save --ignore-scripts --no-audit --no-fund "typescript@npm:@typescript/typescript6@^6.0.2"
 COPY . .
-ENV SEED_TIMEOUT=900
-CMD ["sh", "scripts/run-seeders.sh"]
+CMD ["sh", "docker/seed-cron.sh"]
