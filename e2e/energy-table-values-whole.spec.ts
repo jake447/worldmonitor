@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { seedAnonymousDashboard } from './bootstrap-request-budget-fixtures';
+import { evidenceScreenshot } from './evidence-screenshot';
 
 // The energy registry tables gave their long name column most of the width, so
 // short values broke mid-value: "2025-11-" over "01", "Crude" over "hub",
@@ -34,6 +35,7 @@ const VIEWPORTS: Array<{ width: number; height: number; fontScale: number; mobil
   { width: 1920, height: 1200, fontScale: 1 },
   { width: 1845, height: 1100, fontScale: 1 },
   { width: 1366, height: 768, fontScale: 1 },
+  { width: 1440, height: 900, fontScale: 1 },
   { width: 1920, height: 1200, fontScale: 1.25 },
   { width: 1920, height: 1200, fontScale: 2 },
   { width: 393, height: 852, fontScale: 1, mobile: true },
@@ -45,7 +47,14 @@ interface TableFit {
   // Stacked layout: below 31em of the wrap's text the rows stack, the name
   // cell spans the row and the header is visually hidden.
   shouldStack: boolean; stacked: boolean; narrowFirstCells: number; headerHeight: number;
+  // The first header and body cell, for the shared `.wm-table` style.
+  th: Record<string, string>; td: Record<string, string>;
 }
+
+// The `.wm-table` header and cell metrics at 100% text, before the
+// panel-body container query narrows inline padding in columns under 480px.
+const WM_TABLE_TH = { fontSize: '10px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.4px', paddingTop: '4px' };
+const WM_TABLE_TD = { fontSize: '11px', fontWeight: '400', textTransform: 'none', letterSpacing: 'normal', paddingTop: '5px' };
 
 function measure(page: Page, key: string, valueColumns: readonly number[], words: string, stackEm: number): Promise<TableFit> {
   return page.evaluate(({ key, valueColumns, words, stackEm }) => {
@@ -107,7 +116,17 @@ function measure(page: Page, key: string, valueColumns: readonly number[], words
       expectRole(row, 'row', 'tr');
       for (const cell of row.cells) expectRole(cell, cell.tagName === 'TH' ? 'columnheader' : 'cell', cell.tagName.toLowerCase());
     }
+    const cellStyle = (cell: Element | null): Record<string, string> => {
+      if (!cell) return {};
+      const c = getComputedStyle(cell);
+      return {
+        fontSize: c.fontSize, fontWeight: c.fontWeight, textTransform: c.textTransform, letterSpacing: c.letterSpacing,
+        paddingTop: c.paddingTop, color: c.color, borderBottom: `${c.borderBottomWidth} ${c.borderBottomStyle} ${c.borderBottomColor}`,
+      };
+    };
     return {
+      th: cellStyle(table.querySelector('thead th')),
+      td: cellStyle(table.querySelector('tbody td')),
       shouldStack: wrap.getBoundingClientRect().width <= stackEm * parseFloat(wrapStyle.fontSize),
       stacked: getComputedStyle(table).display === 'block',
       narrowFirstCells,
@@ -126,7 +145,9 @@ test('energy table values and names stay whole inside their column', async ({ br
   test.setTimeout(240_000);
   let stackedNarrowPanels = 0;
   let wideTables = 0;
+  let styledTables = 0;
   for (const viewport of VIEWPORTS) {
+    const cellStyles = new Map<string, { th: Record<string, string>; td: Record<string, string> }>();
     const { fontScale, mobile = false, colSpans, ...size } = viewport;
     const context = await browser.newContext({ viewport: size, colorScheme: 'dark', isMobile: mobile, hasTouch: mobile });
     const page = await context.newPage();
@@ -156,7 +177,7 @@ test('energy table values and names stay whole inside their column', async ({ br
           return panel.locator('tbody tr').count();
         }, { message: `${key} rows at ${variant}`, timeout: 90_000 })
         .toBe(rows);
-      await panel.screenshot({ path: testInfo.outputPath(`${key}-${variant}.png`) });
+      await evidenceScreenshot(panel, { path: testInfo.outputPath(`${key}-${variant}.png`) });
       const fit = await measure(page, key, valueColumns, words, stackEm);
       const label = `${key} at ${variant} (panel ${fit.panel}px)`;
       expect.soft(fit.split, `${label}: values broken across lines`).toEqual([]);
@@ -171,12 +192,25 @@ test('energy table values and names stay whole inside their column', async ({ br
       } else {
         expect.soft(fit.headerHeight, `${label}: column headers hidden in the table layout`).toBeGreaterThan(1);
         if (key === 'energy-disruptions') wideTables += 1;
+        if (fontScale === 1) {
+          expect.soft(fit.th, `${label}: header cell uses the shared table style`).toMatchObject(WM_TABLE_TH);
+          expect.soft(fit.td, `${label}: body cell uses the shared table style`).toMatchObject(WM_TABLE_TD);
+          cellStyles.set(key, { th: fit.th, td: fit.td });
+          styledTables += 1;
+        }
       }
+    }
+    // Colours and row borders match across every energy table in this view.
+    const colours = [...cellStyles.values()].map(({ th, td }) => ({ th: [th.color, th.borderBottom], td: [td.color, td.borderBottom] }));
+    for (const style of colours.slice(1)) {
+      expect.soft(style, `${variant}: energy tables share header and cell colours`).toEqual(colours[0]);
     }
     await context.close();
   }
-  // The 1366px layout puts every panel in a column of 340px or less.
-  expect(stackedNarrowPanels, 'no panel stacked in a column of 340px or less').toBe(PANELS.length);
+  // At 1440px the sidebar holds two columns of about 279px. Stacked
+  // layouts can also put panels in columns of 340px or less.
+  expect(stackedNarrowPanels, 'no panel stacked in a column of 340px or less').toBeGreaterThanOrEqual(PANELS.length);
   // The widened panel must exercise the five-column disruptions table.
   expect(wideTables, 'the disruptions log never rendered as a table').toBeGreaterThan(0);
+  expect(styledTables, 'no energy table rendered as a table at 100% text').toBeGreaterThan(0);
 });
