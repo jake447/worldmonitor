@@ -117,6 +117,8 @@ COPY docker/supervisord.conf /etc/supervisor/conf.d/worldmonitor.conf
 COPY docker/entrypoint.sh /app/entrypoint.sh
 COPY docker/render-nginx-realip.mjs /app/render-nginx-realip.mjs
 COPY docker/validate-session-secret.mjs /app/validate-session-secret.mjs
+# The Survival Summit members gate (not upstream World Monitor).
+COPY docker/tss-gate.mjs /app/tss-gate.mjs
 RUN chmod +x /app/entrypoint.sh
 
 # Ensure writable dirs for non-root

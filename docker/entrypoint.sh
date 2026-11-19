@@ -25,6 +25,8 @@ if [ -z "${LOCAL_API_TOKEN:-}" ]; then
   export LOCAL_API_TOKEN
 fi
 
+export TSS_GATE_PORT="${TSS_GATE_PORT:-46124}"
+
 node /app/render-nginx-realip.mjs
-envsubst '$LOCAL_API_PORT $LOCAL_API_TOKEN' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf
+envsubst '$LOCAL_API_PORT $LOCAL_API_TOKEN $TSS_GATE_PORT' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/worldmonitor.conf
