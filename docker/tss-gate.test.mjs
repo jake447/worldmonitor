@@ -158,6 +158,67 @@ try {
   await check('an unknown path is a 404, not a pass', async () => {
     assert.equal((await get('/anything-else')).status, 404);
   });
+
+  // The allowlist: routes the dashboard fetches without credentials.
+  const checkUri = (uri, cookie) =>
+    fetch(`${BASE}/gate/check`, {
+      redirect: 'manual',
+      headers: { ...(cookie ? { cookie } : {}), 'x-original-uri': uri },
+    });
+
+  await check('an upstream-public RPC passes with no cookie', async () => {
+    for (const uri of [
+      '/api/news/v1/list-feed-digest?lang=en',
+      '/api/forecast/v1/get-forecasts',
+      '/api/market/v1/get-fear-greed-index',
+      '/api/reverse-geocode?lat=1&lon=2',
+      '/api/bootstrap?keys=weatherAlerts&public=1',
+    ]) {
+      assert.equal((await checkUri(uri)).status, 204, uri);
+    }
+  });
+
+  await check('a members-only route is still refused with no cookie', async () => {
+    for (const uri of [
+      '/',
+      '/countries/iran',
+      '/api/military/v1/list-military-flights?sw_lat=1',
+      '/api/maritime/v1/get-vessel-snapshot?sw_lat=1',
+      '/api/conflict/v1/list-acled-events',
+      '/api/wm-session',
+      '/api/bootstrap?keys=aaiiSentiment',
+    ]) {
+      assert.equal((await checkUri(uri)).status, 401, uri);
+    }
+  });
+
+  await check('public=1 cannot be tacked onto a gated route', async () => {
+    for (const uri of [
+      '/api/military/v1/list-military-flights?public=1',
+      '/api/maritime/v1/get-vessel-snapshot?public=1',
+      '/?public=1',
+      '/api/wm-session?public=1',
+    ]) {
+      assert.equal((await checkUri(uri)).status, 401, uri);
+    }
+  });
+
+  await check('a path cannot be smuggled past the allowlist', async () => {
+    for (const uri of [
+      '/api/gpsjam/../military/v1/list-military-flights',
+      '/api/reverse-geocode/../../api/wm-session',
+      '/api/news/v1/list-feed-digest/../../../api/wm-session',
+    ]) {
+      assert.equal((await checkUri(uri)).status, 401, uri);
+    }
+  });
+
+  await check('a missing or junk original URI is refused', async () => {
+    assert.equal((await fetch(`${BASE}/gate/check`, { redirect: 'manual' })).status, 401);
+    for (const uri of ['', 'not-a-path', 'http://evil.com/api/gpsjam', '//evil.com/api/gpsjam']) {
+      assert.equal((await checkUri(uri)).status, 401, JSON.stringify(uri));
+    }
+  });
 } finally {
   child.kill();
 }

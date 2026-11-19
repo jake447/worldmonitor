@@ -34,6 +34,74 @@ const PORT = Number(process.env.TSS_GATE_PORT || 46124);
 const SECRET = (process.env.MAP_SSO_SECRET || '').trim();
 const LOGIN_BASE = (process.env.TSS_GATE_LOGIN_URL || 'https://thesurvivalsummit.com/api/sso/map').trim();
 const COOKIE = 'tss_gate';
+
+/**
+ * Routes the dashboard fetches WITHOUT credentials, which therefore cannot
+ * carry the gate cookie however the member signed in.
+ *
+ * This is not a hole punched for convenience. World Monitor's frontend has an
+ * enumerated anonymous-access set, and these calls deliberately opt out of its
+ * own session interceptor: src/shared/public-rpc-cache.ts says "a path listed
+ * here is reachable with no credential whatever ENDPOINT_ENTITLEMENTS says",
+ * and each one "is already shown to anonymous dashboard visitors" on
+ * worldmonitor.app. Refusing them here does not protect anything that is not
+ * already public upstream; it only breaks those panels for paying members.
+ *
+ * What stays members-only is everything that makes the map worth paying for:
+ * the dashboard page itself, every deep link, military flights, vessels,
+ * conflict events, and every other route not named here. Tier policy within
+ * these routes is still the sidecar's job, not this gate's.
+ *
+ * Keep in step with src/shared/public-rpc-cache.ts when merging upstream.
+ */
+const PUBLIC_PATHS = new Set([
+  // PUBLIC_SHARED_RPC_PATHS and LIVE_TOPIC_RPC_PATHS.
+  '/api/news/v1/list-feed-digest',
+  '/api/displacement/v1/get-displacement-summary',
+  '/api/displacement/v1/get-cross-border-movements',
+  '/api/forecast/v1/get-forecasts',
+  '/api/supply-chain/v1/get-chokepoint-status',
+  '/api/intelligence/v1/get-pizzint-status',
+  '/api/market/v1/get-fear-greed-index',
+  '/api/infrastructure/v1/list-internet-outages',
+  '/api/prediction/v1/list-prediction-markets',
+  '/api/economic/v1/get-national-debt',
+  '/api/economic/v1/get-us-treasury-par-yield-curve',
+  '/api/economic/v1/get-oil-inventories',
+  '/api/intelligence/v1/list-security-advisories',
+  '/api/news/v1/search-fact-checks',
+  // Utility routes that carry no intel of their own.
+  '/api/reverse-geocode',
+  '/api/analytics-health',
+  '/api/miit-news',
+  '/api/gpsjam',
+  '/api/oref-alerts',
+]);
+
+/**
+ * True when nginx is asking about a route the dashboard reaches without a
+ * cookie. `public=1` is upstream's own marker for an anonymous bootstrap read,
+ * and the sidecar still decides which keys that marker is valid for
+ * (src/services/wm-session.ts), so honouring it here cannot widen access
+ * beyond what upstream already allows. The pathname is checked exactly, so
+ * tacking public=1 onto a gated route does not get past this.
+ */
+function isPublicRoute(originalUri) {
+  if (typeof originalUri !== 'string' || !originalUri.startsWith('/')) return false;
+  // "//evil.com/api/gpsjam" is protocol-relative, so resolving it yields the
+  // pathname /api/gpsjam and would have passed the allowlist. nginx routes
+  // such a request line to the SPA, so letting it through served the
+  // dashboard to an anonymous caller. Same rule as safePath.
+  if (/^\/[/\\]/.test(originalUri)) return false;
+  let url;
+  try {
+    url = new URL(originalUri, 'http://gate.invalid');
+  } catch {
+    return false;
+  }
+  if (PUBLIC_PATHS.has(url.pathname)) return true;
+  return url.pathname === '/api/bootstrap' && url.searchParams.get('public') === '1';
+}
 const SESSION_SECONDS = 12 * 60 * 60;
 /** Bound on an inbound SSO token's lifetime, whatever exp it carries. */
 const MAX_TOKEN_AGE_SECONDS = 600;
@@ -153,6 +221,12 @@ const server = createServer((req, res) => {
   const path = url.pathname;
 
   if (path === '/gate/check') {
+    // nginx forwards the request it is really asking about; this subrequest's
+    // own path is always /gate/check.
+    if (isPublicRoute(req.headers['x-original-uri'])) {
+      res.writeHead(204).end();
+      return;
+    }
     const token = cookieValue(COOKIE, req.headers.cookie);
     if (token && verify(token, COOKIE_SECRET)) {
       res.writeHead(204).end();
