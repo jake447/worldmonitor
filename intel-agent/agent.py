@@ -27,13 +27,12 @@ Every address this sends to comes from BRIEF_RECIPIENTS. Nothing is baked in.
 import base64
 import hashlib
 import hmac
-import html
 import json
 import os
 import sys
 import time
 import traceback
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import httpx
 from anthropic import Anthropic
@@ -115,6 +114,12 @@ factual tone. No emojis, and no em dashes."""
 # ---- Carried over unchanged from the ShadowBroker intel-agent. These never
 # depended on a backend, so there was nothing to rewrite.
 # ---------------------------------------------------------------------------
+
+
+def _client() -> httpx.Client:
+    """Short-lived client for the Resend send. send_email expects this name."""
+    return httpx.Client(timeout=30.0)
+
 def _ext_get(url: str, params=None, headers=None, timeout: float = 25.0):
     """GET an external JSON feed. Never raises; returns parsed JSON or error dict."""
     h = {"User-Agent": "survival-summit-intel-brief/2.0"}
